@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     # General
     TORCH_DEVICE: Optional[str] = None
     IMAGE_DPI: int = 96
+    IN_STREAMLIT: bool = False # Whether we're running in streamlit
 
     # Paths
     DATA_DIR: str = "data"
@@ -34,12 +35,16 @@ class Settings(BaseSettings):
     @computed_field
     def TORCH_DEVICE_DETECTION(self) -> str:
         if self.TORCH_DEVICE is not None:
+            # Does not work with mps
+            if "mps" in self.TORCH_DEVICE:
+                return "cpu"
+
             return self.TORCH_DEVICE
 
-        # Does not work with mps
         if torch.cuda.is_available():
             return "cuda"
 
+        # Does not work with mps
         return "cpu"
 
     # Text detection
@@ -51,6 +56,7 @@ class Settings(BaseSettings):
     DETECTOR_TEXT_THRESHOLD: float = 0.6 # Threshold for text detection (above this is considered text)
     DETECTOR_BLANK_THRESHOLD: float = 0.35 # Threshold for blank space (below this is considered blank)
     DETECTOR_POSTPROCESSING_CPU_WORKERS: int = min(8, os.cpu_count()) # Number of workers for postprocessing
+    DETECTOR_MIN_PARALLEL_THRESH: int = 3 # Minimum number of images before we parallelize
 
     # Text recognition
     RECOGNITION_MODEL_CHECKPOINT: str = "vikp/surya_rec"
@@ -65,7 +71,9 @@ class Settings(BaseSettings):
     }
     RECOGNITION_FONT_DL_BASE: str = "https://github.com/satbyy/go-noto-universal/releases/download/v7.0"
     RECOGNITION_BENCH_DATASET_NAME: str = "vikp/rec_bench"
-    RECOGNITION_PAD_VALUE: int = 0 # Should be 0 or 255
+    RECOGNITION_PAD_VALUE: int = 255 # Should be 0 or 255
+    RECOGNITION_STATIC_CACHE: bool = False # Static cache for torch compile
+    RECOGNITION_MAX_LANGS: int = 4
 
     # Layout
     LAYOUT_MODEL_CHECKPOINT: str = "vikp/surya_layout2"

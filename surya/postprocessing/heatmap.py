@@ -79,19 +79,20 @@ def get_dynamic_thresholds(linemap, text_threshold, low_text, typical_top10_avg=
 def detect_boxes(linemap, text_threshold, low_text):
     # From CRAFT - https://github.com/clovaai/CRAFT-pytorch
     # prepare data
-    linemap = linemap.copy()
     img_h, img_w = linemap.shape
 
     text_threshold, low_text = get_dynamic_thresholds(linemap, text_threshold, low_text)
 
     ret, text_score = cv2.threshold(linemap, low_text, 1, cv2.THRESH_BINARY)
 
-    text_score_comb = np.clip(text_score, 0, 1)
-    label_count, labels, stats, centroids = cv2.connectedComponentsWithStats(text_score_comb.astype(np.uint8), connectivity=4)
+    text_score_comb = np.clip(text_score, 0, 1).astype(np.uint8)
+    label_count, labels, stats, centroids = cv2.connectedComponentsWithStats(text_score_comb, connectivity=4)
 
     det = []
     confidences = []
     max_confidence = 0
+    mask = np.zeros_like(linemap, dtype=np.uint8)
+
     for k in range(1, label_count):
         # size filtering
         size = stats[k, cv2.CC_STAT_AREA]
@@ -141,9 +142,8 @@ def detect_boxes(linemap, text_threshold, low_text):
         box = np.roll(box, 4-startidx, 0)
         box = np.array(box)
 
-        mask = np.zeros_like(linemap).astype(np.uint8)
-        cv2.fillPoly(mask, [np.int32(box)], 255)
-        mask = mask.astype(np.float32) / 255
+        mask.fill(0)
+        cv2.fillPoly(mask, [np.int32(box)], 1)
 
         roi = np.where(mask == 1, linemap, 0)
         confidence = np.mean(roi[roi != 0])

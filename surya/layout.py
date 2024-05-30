@@ -10,7 +10,7 @@ from surya.schema import LayoutResult, LayoutBox, TextDetectionResult
 from surya.settings import settings
 
 
-def get_regions_from_detection_result(detection_result: TextDetectionResult, heatmaps: List[Image.Image], orig_size, id2label, segment_assignment, vertical_line_width=20) -> List[LayoutBox]:
+def get_regions_from_detection_result(detection_result: TextDetectionResult, heatmaps: List[np.ndarray], orig_size, id2label, segment_assignment, vertical_line_width=20) -> List[LayoutBox]:
     logits = np.stack(heatmaps, axis=0)
     vertical_line_bboxes = [line for line in detection_result.vertical_lines]
     line_bboxes = detection_result.bboxes
@@ -126,7 +126,7 @@ def get_regions_from_detection_result(detection_result: TextDetectionResult, hea
         new_boxes.append(LayoutBox(polygon=bbox.polygon, label="Text", confidence=.5))
 
     for bbox in new_boxes:
-        bbox.rescale(list(reversed(heatmap.shape)), orig_size)
+        bbox.rescale(list(reversed(heatmaps[0].shape)), orig_size)
 
     detected_boxes = [bbox for bbox in new_boxes if bbox.area > 16]
 
@@ -145,7 +145,7 @@ def get_regions_from_detection_result(detection_result: TextDetectionResult, hea
     return detected_boxes
 
 
-def get_regions(heatmaps: List[Image.Image], orig_size, id2label, segment_assignment) -> List[LayoutBox]:
+def get_regions(heatmaps: List[np.ndarray], orig_size, id2label, segment_assignment) -> List[LayoutBox]:
     bboxes = []
     for i in range(1, len(id2label)):  # Skip the blank class
         heatmap = heatmaps[i]
@@ -160,7 +160,7 @@ def get_regions(heatmaps: List[Image.Image], orig_size, id2label, segment_assign
     return bboxes
 
 
-def parallel_get_regions(heatmaps: List[Image.Image], orig_size, id2label, detection_results=None) -> List[LayoutResult]:
+def parallel_get_regions(heatmaps: List[np.ndarray], orig_size, id2label, detection_results=None) -> LayoutResult:
     logits = np.stack(heatmaps, axis=0)
     segment_assignment = logits.argmax(axis=0)
     if detection_results is not None:
@@ -181,18 +181,19 @@ def parallel_get_regions(heatmaps: List[Image.Image], orig_size, id2label, detec
     return result
 
 
-def batch_layout_detection(images: List, model, processor, detection_results: Optional[List[TextDetectionResult]] = None) -> List[LayoutResult]:
-    preds, orig_sizes = batch_detection(images, model, processor)
+def batch_layout_detection(images: List, model, processor, detection_results: Optional[List[TextDetectionResult]] = None, batch_size=None) -> List[LayoutResult]:
+    preds, orig_sizes = batch_detection(images, model, processor, batch_size=batch_size)
     id2label = model.config.id2label
 
     results = []
-    if len(images) == 1: # Ensures we don't parallelize with streamlit
+    if settings.IN_STREAMLIT or len(images) < settings.DETECTOR_MIN_PARALLEL_THRESH: # Ensures we don't parallelize with streamlit or too few images
         for i in range(len(images)):
             result = parallel_get_regions(preds[i], orig_sizes[i], id2label, detection_results[i] if detection_results else None)
             results.append(result)
     else:
         futures = []
-        with ProcessPoolExecutor(max_workers=settings.DETECTOR_POSTPROCESSING_CPU_WORKERS) as executor:
+        max_workers = min(settings.DETECTOR_POSTPROCESSING_CPU_WORKERS, len(images))
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
             for i in range(len(images)):
                 future = executor.submit(parallel_get_regions, preds[i], orig_sizes[i], id2label, detection_results[i] if detection_results else None)
                 futures.append(future)
